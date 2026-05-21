@@ -29,7 +29,45 @@ contract EscrowController is Ownable, Pausable {
 
     bool public printersEnabled = true;
 
+    event EscrowDeposited(
+    address indexed sender,
+    uint256 amount
+);
+
+event DigitalMinted(
+    uint256 value
+);
+
+event PhysicalMinted(
+    uint256 value
+);
+
+event DigitalBurned(
+    uint256 value
+);
+
+event PhysicalBurned(
+    uint256 value
+);
+
+event SystemPaused(
+    uint256 collateralRatio
+);
+
+event SystemUnpaused(
+    uint256 collateralRatio
+);
+
     constructor() {}
+
+modifier issuanceAllowed() {
+    require(
+        printersEnabled,
+        "Issuance disabled"
+    );
+
+    _;
+}
 
 function collateralRatio() public view returns (uint256) {
     if (totalFaceValue == 0) return type(uint256).max;
@@ -38,32 +76,79 @@ function collateralRatio() public view returns (uint256) {
 }
 
 function checkSystemHealth() public {
-    if (collateralRatio() < MIN_COLLATERAL_RATIO) {
+
+    uint256 ratio = collateralRatio();
+
+    if (ratio < MIN_COLLATERAL_RATIO) {
+
         printersEnabled = false;
-        _pause();
+
+        if (!paused()) {
+            _pause();
+
+            emit SystemPaused(ratio);
+        }
+
     } else {
+
         printersEnabled = true;
-        _unpause();
+
+        if (paused()) {
+            _unpause();
+
+            emit SystemUnpaused(ratio);
+        }
     }
 }
 
 function depositEscrow() external payable {
     escrowBalance += msg.value;
+    emit EscrowDeposited(
+    msg.sender,
+    msg.value
+);
     checkSystemHealth();
 }
 
-function mintDigital(uint256 value) external onlyOwner {
+function mintDigital(uint256 value) external onlyOwner issuanceAllowed {
     totalDigitalSatNotes += 1;
     totalFaceValue += value;
+    emit DigitalMinted(value);
     checkSystemHealth();
 }
 
-function mintPhysical(uint256 value) external onlyOwner {
+function mintPhysical(uint256 value)
+    external
+    onlyOwner
+    issuanceAllowed
+{
     totalPhysicalSatNotes += 1;
+
     totalFaceValue += value;
+
+    emit PhysicalMinted(value);
+
     checkSystemHealth();
 }
 
+function burnPhysical(uint256 value)
+    external
+    onlyOwner
+{
+    require(
+        totalPhysicalSatNotes > 0,
+        "No physical notes"
+    );
+
+    totalPhysicalSatNotes -= 1;
+
+    totalFaceValue -= value;
+
+    emit PhysicalBurned(value);
+
+    checkSystemHealth();
+}
+   
     uint256 public totalEscrowed;
     uint256 public totalCirculating;
 
@@ -252,6 +337,27 @@ function mintPhysical(uint256 value) external onlyOwner {
 // =========================
 // FUTURE: TREASURY INTEGRATION HOOK
 // =========================
+
+
+modifier onlyTreasury() {
+    require(
+        msg.sender == treasuryVault,
+        "Treasury only"
+    );
+
+    _;
+}
+
+function syncEscrowBalance(
+    uint256 newBalance
+)
+    external
+    onlyTreasury
+{
+    escrowBalance = newBalance;
+
+    checkSystemHealth();
+}
 
 address public treasuryVault;
 
